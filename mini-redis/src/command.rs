@@ -66,6 +66,16 @@ pub fn handle_command(cmd: &str, store: &Store) -> String {
             }
             response
         }
+        "FLUSH" => {
+            db.clear();
+            "+OK\r\n".to_string()
+        }
+        "RENAME" if parts.len() == 3 => {
+            match db.remove(parts[1]) {
+                Some(entry) => { db.insert(parts[2].to_string(), entry); "+OK\r\n".to_string() }
+                None => "-ERR no such key\r\n".to_string(),
+            }
+        }
         _ => "-ERR unknown command\r\n".to_string(),
     }
 }
