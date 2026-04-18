@@ -100,3 +100,24 @@ fn test_transpose_twice_is_identity() {
     let tt = ops::transpose(&ops::transpose(&a));
     assert_tensor_close(&tt, &a.data, &a.shape);
 }
+
+#[test]
+fn test_causal_mask_effect() {
+    // After softmax with causal mask, first row should be [1, 0, 0],
+    // second row should sum to 1 with weight on positions 0 and 1 only.
+    use rusty_llm::ops::softmax;
+    let mut scores = Tensor::new(
+        vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        vec![3, 3],
+    );
+    // Apply mask manually
+    scores.data[1] = f32::NEG_INFINITY;
+    scores.data[2] = f32::NEG_INFINITY;
+    scores.data[5] = f32::NEG_INFINITY;
+    let w = softmax(&scores);
+    assert_abs_diff_eq!(w.data[0], 1.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(w.data[1], 0.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(w.data[2], 0.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(w.data[3] + w.data[4], 1.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(w.data[8], 1.0 / 3.0, epsilon = 1e-6);
+}

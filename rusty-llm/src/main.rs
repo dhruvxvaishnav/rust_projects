@@ -1,31 +1,34 @@
+use rusty_llm::block::Block;
+use rusty_llm::config::Config;
+use rusty_llm::embedding::{embed_positions, embed_tokens};
+use rusty_llm::ops::add;
 use rusty_llm::safetensors::SafeTensors;
 
 fn main() {
-    let st = SafeTensors::open("models/gpt2/model.safetensors").expect("failed to open model");
+    let cfg = Config::gpt2_small();
+    let st = SafeTensors::open("models/gpt2/model.safetensors").unwrap();
 
-    println!("Loaded {} tensors\n", st.names().len());
+    // Fake tokens: "Hello world" is roughly [15496, 995] in GPT-2's BPE.
+    // We'll do real tokenization next weekend.
+    let token_ids: Vec<u32> = vec![15496, 995];
+    println!("Input tokens: {:?}", token_ids);
 
-    // Print a few key tensors and their shapes
-    let interesting = [
-        "wte.weight",             // token embeddings
-        "wpe.weight",             // positional embeddings
-        "h.0.ln_1.weight",        // first block's first layernorm
-        "h.0.attn.c_attn.weight", // first block's QKV projection
-        "h.0.attn.c_proj.weight", // first block's output projection
-        "h.0.mlp.c_fc.weight",    // first block's MLP up-projection
-        "h.0.mlp.c_proj.weight",  // first block's MLP down-projection
-        "ln_f.weight",            // final layernorm
-    ];
-
-    for name in interesting {
-        match st.shape(name) {
-            Some(s) => println!("  {:40} shape = {:?}", name, s),
-            None => println!("  {:40} NOT FOUND", name),
-        }
-    }
-
-    // Sanity check one tensor
+    // Embeddings
     let wte = st.load("wte.weight");
-    println!("\nwte.weight first 5 values: {:?}", &wte.data[..5]);
-    println!("wte.weight shape: {:?} (expected [50257, 768])", wte.shape);
+    let wpe = st.load("wpe.weight");
+    let tok_emb = embed_tokens(&wte, &token_ids);
+    let pos_emb = embed_positions(&wpe, token_ids.len());
+    let mut x = add(&tok_emb, &pos_emb);
+    println!("After embedding: shape={:?}", x.shape);
+    println!("  first 5 values of row 0: {:?}", &x.data[..5]);
+
+    // Run through block 0
+    let block0 = Block::load(&st, 0);
+    x = block0.forward(&x, &cfg);
+    println!("\nAfter block 0: shape={:?}", x.shape);
+    println!("  first 5 values of row 0: {:?}", &x.data[..5]);
+    println!(
+        "  first 5 values of row 1: {:?}",
+        &x.data[x.shape[1]..x.shape[1] + 5]
+    );
 }
