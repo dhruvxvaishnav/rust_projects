@@ -7,7 +7,11 @@ pub fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
     assert_eq!(b.ndim(), 2, "matmul: b must be 2D");
     let (m, k) = (a.shape[0], a.shape[1]);
     let (k2, n) = (b.shape[0], b.shape[1]);
-    assert_eq!(k, k2, "matmul: inner dims must match, got {}x{} @ {}x{}", m, k, k2, n);
+    assert_eq!(
+        k, k2,
+        "matmul: inner dims must match, got {}x{} @ {}x{}",
+        m, k, k2, n
+    );
 
     let mut out = vec![0.0f32; m * n];
     for i in 0..m {
@@ -99,10 +103,14 @@ pub fn layer_norm(x: &Tensor, gamma: &Tensor, beta: &Tensor, eps: f32) -> Tensor
 /// 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 pub fn gelu(x: &Tensor) -> Tensor {
     let c = (2.0f32 / std::f32::consts::PI).sqrt();
-    let data = x.data.iter().map(|&v| {
-        let inner = c * (v + 0.044715 * v.powi(3));
-        0.5 * v * (1.0 + inner.tanh())
-    }).collect();
+    let data = x
+        .data
+        .iter()
+        .map(|&v| {
+            let inner = c * (v + 0.044715 * v.powi(3));
+            0.5 * v * (1.0 + inner.tanh())
+        })
+        .collect();
     Tensor::new(data, x.shape.clone())
 }
 

@@ -21,7 +21,10 @@ impl Tensor {
 
     pub fn zeros(shape: Vec<usize>) -> Self {
         let n: usize = shape.iter().product();
-        Self { data: vec![0.0; n], shape }
+        Self {
+            data: vec![0.0; n],
+            shape,
+        }
     }
 
     pub fn from_slice(data: &[f32], shape: Vec<usize>) -> Self {
@@ -61,8 +64,11 @@ impl Tensor {
 
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Tensor(shape={:?}, data[..min(8)]={:?})",
-               self.shape,
-               &self.data[..self.data.len().min(8)])
+        write!(
+            f,
+            "Tensor(shape={:?}, data[..min(8)]={:?})",
+            self.shape,
+            &self.data[..self.data.len().min(8)]
+        )
     }
 }
