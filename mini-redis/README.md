@@ -122,7 +122,7 @@ Press `Ctrl+C` to stop the server — data will be saved to `dump.rdb` automatic
 
 ## Project Structure
 
-```
+```text
 src/
   main.rs         # TCP server, thread spawning
   store.rs        # Entry struct, shared store type
