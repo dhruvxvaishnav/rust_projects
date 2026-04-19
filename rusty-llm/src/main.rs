@@ -1,34 +1,48 @@
-use rusty_llm::block::Block;
 use rusty_llm::config::Config;
-use rusty_llm::embedding::{embed_positions, embed_tokens};
-use rusty_llm::ops::add;
+use rusty_llm::model::GPT2;
 use rusty_llm::safetensors::SafeTensors;
+use std::time::Instant;
 
 fn main() {
+    println!("Loading model...");
+    let t0 = Instant::now();
     let cfg = Config::gpt2_small();
-    let st = SafeTensors::open("models/gpt2/model.safetensors").unwrap();
+    let st = SafeTensors::open("models/gpt2/model.safetensors")
+        .expect("failed to open model.safetensors");
+    let model = GPT2::load(&st, cfg.clone());
+    println!("Loaded in {:.2}s\n", t0.elapsed().as_secs_f32());
 
-    // Fake tokens: "Hello world" is roughly [15496, 995] in GPT-2's BPE.
-    // We'll do real tokenization next weekend.
-    let token_ids: Vec<u32> = vec![15496, 995];
+    // "My name is" — hand-tokenized for now. Weekend 5 does real tokenization.
+    //   My      -> 3666
+    //   ' name' -> 1438
+    //   ' is'   -> 318
+    let token_ids: Vec<u32> = vec![3666, 1438, 318];
     println!("Input tokens: {:?}", token_ids);
 
-    // Embeddings
-    let wte = st.load("wte.weight");
-    let wpe = st.load("wpe.weight");
-    let tok_emb = embed_tokens(&wte, &token_ids);
-    let pos_emb = embed_positions(&wpe, token_ids.len());
-    let mut x = add(&tok_emb, &pos_emb);
-    println!("After embedding: shape={:?}", x.shape);
-    println!("  first 5 values of row 0: {:?}", &x.data[..5]);
+    // Forward pass
+    let t0 = Instant::now();
+    let logits = model.forward(&token_ids);
+    let dt = t0.elapsed().as_secs_f32();
+    println!("Forward pass: {:.2}s", dt);
+    println!("Logits shape: {:?}", logits.shape);
 
-    // Run through block 0
-    let block0 = Block::load(&st, 0);
-    x = block0.forward(&x, &cfg);
-    println!("\nAfter block 0: shape={:?}", x.shape);
-    println!("  first 5 values of row 0: {:?}", &x.data[..5]);
-    println!(
-        "  first 5 values of row 1: {:?}",
-        &x.data[x.shape[1]..x.shape[1] + 5]
-    );
+    // Inspect the last row (logits for the token after the input)
+    let vocab = cfg.vocab_size;
+    let seq_len = token_ids.len();
+    let last = &logits.data[(seq_len - 1) * vocab..seq_len * vocab];
+
+    println!("\nLast row, first 5 logits: {:?}", &last[..5]);
+
+    // Top-5 next tokens
+    let mut indexed: Vec<(usize, f32)> = last.iter().cloned().enumerate().collect();
+    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    println!("\nTop 5 next tokens:");
+    for (i, v) in indexed.iter().take(5) {
+        println!("  {}: {:.4}", i, v);
+    }
+
+    // Greedy pick
+    let next = indexed[0].0 as u32;
+    println!("\nGreedy next token: {}", next);
+    println!("Expected: 1757  (' John', GPT-2's favorite completion)");
 }
