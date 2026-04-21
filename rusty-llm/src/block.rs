@@ -1,5 +1,6 @@
 use crate::attention::attention;
 use crate::config::Config;
+use crate::kv_cache::LayerCache;
 use crate::ops::{add, add_bias, gelu, layer_norm, matmul};
 use crate::safetensors::SafeTensors;
 use crate::tensor::Tensor;
@@ -19,9 +20,6 @@ pub fn mlp(
     add_bias(&matmul(&h, c_proj_w), c_proj_b)
 }
 
-/// One transformer block. GPT-2 uses pre-LayerNorm:
-///   x = x + attn(ln_1(x))
-///   x = x + mlp(ln_2(x))
 pub struct Block {
     pub ln_1_w: Tensor,
     pub ln_1_b: Tensor,
@@ -56,8 +54,7 @@ impl Block {
         }
     }
 
-    pub fn forward(&self, x: &Tensor, cfg: &Config) -> Tensor {
-        // Attention sub-block with residual
+    pub fn forward(&self, x: &Tensor, cache: &mut LayerCache, cfg: &Config) -> Tensor {
         let normed = layer_norm(x, &self.ln_1_w, &self.ln_1_b, cfg.eps);
         let attn_out = attention(
             &normed,
@@ -65,11 +62,11 @@ impl Block {
             &self.c_attn_b,
             &self.c_proj_attn_w,
             &self.c_proj_attn_b,
+            cache,
             cfg,
         );
         let x = add(x, &attn_out);
 
-        // MLP sub-block with residual
         let normed = layer_norm(&x, &self.ln_2_w, &self.ln_2_b, cfg.eps);
         let mlp_out = mlp(
             &normed,

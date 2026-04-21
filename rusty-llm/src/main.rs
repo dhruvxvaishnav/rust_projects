@@ -1,48 +1,80 @@
+use rand::SeedableRng;
 use rusty_llm::config::Config;
 use rusty_llm::model::GPT2;
 use rusty_llm::safetensors::SafeTensors;
+use rusty_llm::sampling::sample;
+use rusty_llm::tokenizer::Bpe;
+use std::io::Write;
 use std::time::Instant;
 
 fn main() {
+    // --- Config ---
+    let prompt = "My name is";
+    let max_new_tokens = 20;
+    let temperature = 0.8;
+    let top_k = 40;
+    let seed = 42;
+
+    // --- Load everything ---
     println!("Loading model...");
     let t0 = Instant::now();
     let cfg = Config::gpt2_small();
     let st = SafeTensors::open("models/gpt2/model.safetensors")
         .expect("failed to open model.safetensors");
     let model = GPT2::load(&st, cfg.clone());
+    let bpe = Bpe::from_file("models/gpt2/tokenizer.json");
     println!("Loaded in {:.2}s\n", t0.elapsed().as_secs_f32());
 
-    // "My name is" — hand-tokenized for now. Weekend 5 does real tokenization.
-    //   My      -> 3666
-    //   ' name' -> 1438
-    //   ' is'   -> 318
-    let token_ids: Vec<u32> = vec![3666, 1438, 318];
-    println!("Input tokens: {:?}", token_ids);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
 
-    // Forward pass
-    let t0 = Instant::now();
-    let logits = model.forward(&token_ids);
-    let dt = t0.elapsed().as_secs_f32();
-    println!("Forward pass: {:.2}s", dt);
-    println!("Logits shape: {:?}", logits.shape);
+    // --- Tokenize ---
+    let prompt_ids = bpe.encode(prompt);
+    println!("Prompt:  {:?}", prompt);
+    println!("Tokens:  {:?}\n", prompt_ids);
 
-    // Inspect the last row (logits for the token after the input)
+    // --- Prefill: run the whole prompt through, populate the cache ---
+    let mut cache = model.new_cache();
+    let t_prefill = Instant::now();
+    let logits = model.forward(&prompt_ids, 0, &mut cache);
+    let prefill_time = t_prefill.elapsed().as_secs_f32();
+
+    // First new token from the last row of prefill logits
     let vocab = cfg.vocab_size;
-    let seq_len = token_ids.len();
-    let last = &logits.data[(seq_len - 1) * vocab..seq_len * vocab];
+    let last_row = &logits.data[(prompt_ids.len() - 1) * vocab..prompt_ids.len() * vocab];
+    let mut next = sample(last_row, temperature, top_k, &mut rng);
 
-    println!("\nLast row, first 5 logits: {:?}", &last[..5]);
+    let mut generated: Vec<u32> = vec![next];
 
-    // Top-5 next tokens
-    let mut indexed: Vec<(usize, f32)> = last.iter().cloned().enumerate().collect();
-    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    println!("\nTop 5 next tokens:");
-    for (i, v) in indexed.iter().take(5) {
-        println!("  {}: {:.4}", i, v);
+    print!("Output:  {}", prompt);
+    print!("{}", bpe.decode(&[next]));
+    std::io::stdout().flush().ok();
+
+    // --- Decode loop: one token at a time, reusing the cache ---
+    let t_decode = Instant::now();
+    for _ in 1..max_new_tokens {
+        let pos = prompt_ids.len() + generated.len() - 1;
+        let logits = model.forward(&[next], pos, &mut cache);
+        let row = &logits.data[..vocab]; // only one row, new_len = 1
+        next = sample(row, temperature, top_k, &mut rng);
+        generated.push(next);
+
+        print!("{}", bpe.decode(&[next]));
+        std::io::stdout().flush().ok();
     }
+    let decode_time = t_decode.elapsed().as_secs_f32();
 
-    // Greedy pick
-    let next = indexed[0].0 as u32;
-    println!("\nGreedy next token: {}", next);
-    println!("Expected: 1757  (' John', GPT-2's favorite completion)");
+    // --- Stats ---
+    println!("\n\n--- Stats ---");
+    println!(
+        "Prefill: {} tokens in {:.2}s ({:.1} tok/s)",
+        prompt_ids.len(),
+        prefill_time,
+        prompt_ids.len() as f32 / prefill_time
+    );
+    println!(
+        "Decode:  {} tokens in {:.2}s ({:.1} tok/s)",
+        max_new_tokens - 1,
+        decode_time,
+        (max_new_tokens - 1) as f32 / decode_time
+    );
 }
